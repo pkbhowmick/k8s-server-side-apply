@@ -60,7 +60,7 @@ func main() {
 			Namespace: key.Namespace,
 		},
 		StringData: data,
-		Type: core.SecretTypeOpaque,
+		Type:       core.SecretTypeOpaque,
 	}
 	secret2 := secret.DeepCopy()
 
@@ -85,7 +85,7 @@ func main() {
 	if err == nil {
 		panic("expecting a conflict but no conflict occurred")
 	}
-	klog.Errorf("Conflict error: %v",err)
+	klog.Errorf("Conflict error: %v", err)
 
 	// apply secret with current owner "owner1"
 	err = kc.Patch(context.TODO(), secret2, client.Apply, owner1)
@@ -95,6 +95,16 @@ func main() {
 	klog.Info("Secret is successfully updated")
 
 	// check secret after successful updated
+	printSecret(kc, key)
+
+	// make owner2 as share owner of the fields using the same data
+	secret2.ManagedFields = nil
+	err = kc.Patch(context.TODO(), secret2, client.Apply, owner2)
+	if err != nil {
+		panic(err)
+	}
+
+	// check secret with shared ownership
 	printSecret(kc, key)
 
 	// cleanup secret
