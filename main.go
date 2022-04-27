@@ -45,50 +45,71 @@ func main() {
 	}
 
 	key := client.ObjectKey{Namespace: core.NamespaceDefault, Name: "test-secret"}
-	
+
+	data := make(map[string]string)
+	data["username"] = "admin"
+	data["password"] = "admin"
+
 	secret := core.Secret{
-		TypeMeta:   metav1.TypeMeta{
+		TypeMeta: metav1.TypeMeta{
 			Kind:       "Secret",
 			APIVersion: core.SchemeGroupVersion.String(),
-		}, 
+		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name: key.Name,
+			Name:      key.Name,
 			Namespace: key.Namespace,
 		},
-		StringData: map[string]string{
-			"username": "admin",
-			"password": "admin",
-		},
-		Type:       core.SecretTypeOpaque,
+		StringData: data,
+		Type: core.SecretTypeOpaque,
 	}
+	secret2 := secret.DeepCopy()
 
-	err = kc.Patch(context.TODO(), &secret, client.Apply, client.FieldOwner("manager1"))
+	var owner1, owner2 client.FieldOwner
+	owner1 = "manager1"
+	owner2 = "manager2"
+
+	err = kc.Patch(context.TODO(), &secret, client.Apply, owner1)
 	if err != nil {
 		panic(err)
 	}
-	klog.Info("created successfully with manager1 as a field manager")
+	klog.Info("created successfully with owner1 as a field manager")
 
-	// getting the secret
-	createdSecret := core.Secret{}
-	err = kc.Get(context.TODO(), key, &createdSecret)
+	// checking the created secret
+	printSecret(kc, key)
+
+	data["key"] = "val"
+	secret2.StringData = data
+
+	// expecting a conflict with different owner "owner2"
+	err = kc.Patch(context.TODO(), secret2, client.Apply, owner2)
+	if err == nil {
+		panic("expecting a conflict but no conflict occurred")
+	}
+	klog.Errorf("Conflict error: %v",err)
+
+	// apply secret with current owner "owner1"
+	err = kc.Patch(context.TODO(), secret2, client.Apply, owner1)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(createdSecret)
+	klog.Info("Secret is successfully updated")
 
-	upSecret := secret.DeepCopy()
-	upSecret.StringData = map[string]string{"key":"val"}
-
-	// expecting a conflict with different manager "manager2"
-	err = kc.Patch(context.TODO(), upSecret, client.Apply, client.FieldOwner("manager2"))
-	if err != nil {
-		klog.Errorf(err.Error())
-	}
+	// check secret after successful updated
+	printSecret(kc, key)
 
 	// cleanup secret
-	err = kc.Delete(context.TODO(), upSecret)
+	err = kc.Delete(context.TODO(), secret2)
 	if err != nil {
 		panic(err)
 	}
 	klog.Info("secret deleted")
+}
+
+func printSecret(kc client.Client, key client.ObjectKey) {
+	createdSecret := core.Secret{}
+	err := kc.Get(context.TODO(), key, &createdSecret)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(createdSecret)
 }
