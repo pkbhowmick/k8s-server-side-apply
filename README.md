@@ -1,2 +1,5 @@
 # k8s-server-side-apply
-Introduction to Kubernetes Server-Side Apply
+
+k8s doc: https://kubernetes.io/docs/reference/using-api/server-side-apply/
+
+
