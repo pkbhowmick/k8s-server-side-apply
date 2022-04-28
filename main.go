@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+
 	core "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -46,9 +47,9 @@ func main() {
 
 	key := client.ObjectKey{Namespace: core.NamespaceDefault, Name: "test-secret"}
 
-	data := make(map[string]string)
-	data["username"] = "admin"
-	data["password"] = "admin"
+	data := make(map[string][]byte)
+	data["username"] = []byte("admin")
+	data["password"] = []byte("admin")
 
 	secret := core.Secret{
 		TypeMeta: metav1.TypeMeta{
@@ -59,8 +60,8 @@ func main() {
 			Name:      key.Name,
 			Namespace: key.Namespace,
 		},
-		StringData: data,
-		Type:       core.SecretTypeOpaque,
+		Data: data,
+		Type: core.SecretTypeOpaque,
 	}
 	secret2 := secret.DeepCopy()
 
@@ -74,15 +75,14 @@ func main() {
 	}
 	klog.Info("created successfully with owner1 as a field manager")
 	defer cleanSecret(kc, key)
-
 	// checking the created secret
-	printSecret(kc, key)
+	printOwnerInfo(kc, key)
 
-	data["key"] = "val"
-	secret2.StringData = data
-
+	data["username"] = []byte("changedUsername")
+	secret2.Data = data
 	// expecting a conflict with different owner "owner2"
 	err = kc.Patch(context.TODO(), secret2, client.Apply, owner2)
+	printOwnerInfo(kc, key)
 	if err == nil {
 		panic("expecting a conflict but no conflict occurred")
 	}
@@ -94,52 +94,69 @@ func main() {
 		panic(err)
 	}
 	klog.Info("Secret is successfully updated")
-
 	// check secret after successful updated
-	printSecret(kc, key)
+	printOwnerInfo(kc, key)
 
-	// make owner2 as share owner of the fields using the same data
+	// ============= Conflicts Example #1 (Don't overwrite value, become shared manager) =============== //
+	// make owner2 as shared owner of the fields without any modification in the data
 	secret2.ManagedFields = nil
 	err = kc.Patch(context.TODO(), secret2, client.Apply, owner2)
 	if err != nil {
 		panic(err)
 	}
-
 	// check secret with shared ownership
-	printSecret(kc, key)
+	printOwnerInfo(kc, key)
 
+	// ============= Conflicts Example #2 (Overwrite value, become sole manager) =============== //
 	// now going to change data with owner2 should face conflict because now data is owned by both owner1 & owner2
 	secret2.ManagedFields = nil
-	data["key"] = "updatedVal"
-	secret2.StringData = data
+	data["username"] = []byte("none")
+	secret2.Data = data
 	err = kc.Patch(context.TODO(), secret2, client.Apply, owner2)
 	if err == nil {
 		panic("expecting a conflict but no conflict occurred")
 	}
 	klog.Errorf("Conflict error: %v", err)
 
-	// now forcefully update data with owner2 which will eventually make owner2 the only owner of the data
+	// now forcefully update data with owner2 which will eventually make owner2 the only owner of the `username` key
+	secret2.ManagedFields = nil
+	secret2.Data = data
 	err = kc.Patch(context.TODO(), secret2, client.Apply, owner2, client.ForceOwnership)
 	if err != nil {
 		panic(err)
 	}
-	printSecret(kc,key)
+	printOwnerInfo(kc, key)
+
+	// ============ Conflicts Example #3 (Don't overwrite value, give up management claim) =============== //
+	// now owner2 don't overwrite `password` key and give up ownership of password key
+	secret2.ManagedFields = nil
+	newData := map[string][]byte{
+		"username": []byte("owner2"),
+	}
+	secret2.Data = newData
+	err = kc.Patch(context.TODO(), secret2, client.Apply, owner2)
+	if err != nil {
+		panic(err)
+	}
+	printOwnerInfo(kc, key)
 }
 
-func printSecret(kc client.Client, key client.ObjectKey) {
+func printOwnerInfo(kc client.Client, key client.ObjectKey) {
 	createdSecret := core.Secret{}
 	err := kc.Get(context.TODO(), key, &createdSecret)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(createdSecret)
+	fmt.Println(createdSecret.ManagedFields)
+	fmt.Print("Press any key to continue...")
+	fmt.Scanln()
 }
 
 func cleanSecret(kc client.Client, key client.ObjectKey) {
 	// cleanup secret
 	secret := core.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: key.Name,
+			Name:      key.Name,
 			Namespace: key.Namespace,
 		},
 	}
