@@ -73,6 +73,7 @@ func main() {
 		panic(err)
 	}
 	klog.Info("created successfully with owner1 as a field manager")
+	defer cleanSecret(kc, key)
 
 	// checking the created secret
 	printSecret(kc, key)
@@ -107,12 +108,22 @@ func main() {
 	// check secret with shared ownership
 	printSecret(kc, key)
 
-	// cleanup secret
-	err = kc.Delete(context.TODO(), secret2)
+	// now going to change data with owner2 should face conflict because now data is owned by both owner1 & owner2
+	secret2.ManagedFields = nil
+	data["key"] = "updatedVal"
+	secret2.StringData = data
+	err = kc.Patch(context.TODO(), secret2, client.Apply, owner2)
+	if err == nil {
+		panic("expecting a conflict but no conflict occurred")
+	}
+	klog.Errorf("Conflict error: %v", err)
+
+	// now forcefully update data with owner2 which will eventually make owner2 the only owner of the data
+	err = kc.Patch(context.TODO(), secret2, client.Apply, owner2, client.ForceOwnership)
 	if err != nil {
 		panic(err)
 	}
-	klog.Info("secret deleted")
+	printSecret(kc,key)
 }
 
 func printSecret(kc client.Client, key client.ObjectKey) {
@@ -122,4 +133,19 @@ func printSecret(kc client.Client, key client.ObjectKey) {
 		panic(err)
 	}
 	fmt.Println(createdSecret)
+}
+
+func cleanSecret(kc client.Client, key client.ObjectKey) {
+	// cleanup secret
+	secret := core.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: key.Name,
+			Namespace: key.Namespace,
+		},
+	}
+	err := kc.Delete(context.TODO(), &secret)
+	if err != nil {
+		panic(err)
+	}
+	klog.Info("secret deleted")
 }
